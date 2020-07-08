@@ -294,23 +294,38 @@ class Validators
 	}
 
 
-	/**
-	 * Finds whether a string is a valid email address.
-	 */
-	public static function isEmail(string $value): bool
-	{
-		$atom = "[-a-z0-9!#$%&'*+/=?^_`{|}~]"; // RFC 5322 unquoted characters in local-part
-		$alpha = "a-z\x80-\xFF"; // superset of IDN
-		return (bool) preg_match(<<<XX
-		(^
-			("([ !#-[\\]-~]*|\\\\[ -~])+"|$atom+(\\.$atom+)*)  # quoted or unquoted
-			@
-			([0-9$alpha]([-0-9$alpha]{0,61}[0-9$alpha])?\\.)+  # domain - RFC 1034
-			[$alpha]([-0-9$alpha]{0,17}[$alpha])?              # top domain
-		$)Dix
-XX
-, $value);
-	}
+    /**
+     * Finds whether a string is a valid email address.
+     */
+    public static function isEmail(string $value): bool
+    {
+        if (!is_string($value)) {
+            $valid = false;
+        } elseif (!preg_match('/^(?P<name>(?:"?([^"]*)"?\s)?)(?:\s+)?(?:(?P<open><?)((?P<local>.+)@(?P<domain>[^>]+))(?P<close>>?))$/i', $value, $matches)) {
+            $valid = false;
+        } else {
+            $matches['local'] = static::idnToAscii($matches['local']);
+            $matches['domain'] = static::idnToAscii($matches['domain']);
+
+            if (strlen($matches['local']) > 64) {
+                // The maximum total length of a user name or other local-part is 64 octets. RFC 5322 section 4.5.3.1.1
+                // http://tools.ietf.org/html/rfc5321#section-4.5.3.1.1
+                $valid = false;
+            } elseif (strlen($matches['local'] . '@' . $matches['domain']) > 254) {
+                // There is a restriction in RFC 2821 on the length of an address in MAIL and RCPT commands
+                // of 254 characters. Since addresses that do not fit in those fields are not normally useful, the
+                // upper limit on address lengths should normally be considered to be 254.
+                //
+                // Dominic Sayers, RFC 3696 erratum 1690
+                // http://www.rfc-editor.org/errata_search.php?eid=1690
+                $valid = false;
+            } else {
+                $valid = true;
+            }
+        }
+
+        return $valid;
+    }
 
 
 	/**
@@ -362,4 +377,19 @@ XX
 	{
 		return is_string($value) && preg_match('#^[a-zA-Z_\x7f-\xff][a-zA-Z0-9_\x7f-\xff]*$#D', $value);
 	}
+
+    /**
+     * @param $idn
+     *
+     * @return bool|mixed|string
+     */
+    public static function idnToAscii($idn)
+    {
+        if (PHP_VERSION_ID < 50600) {
+            // TODO: drop old PHP versions support
+            return idn_to_ascii($idn);
+        }
+
+        return idn_to_ascii($idn, IDNA_NONTRANSITIONAL_TO_ASCII, INTL_IDNA_VARIANT_UTS46);
+    }
 }
